@@ -1,0 +1,32 @@
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: manager-role
+rules:
+- apiGroups:
+  - network.argonetops.io
+  resources:
+  - interfaceconfigs
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - network.argonetops.io
+  resources:
+  - interfaceconfigs/finalizers
+  verbs:
+  - update
+- apiGroups:
+  - network.argonetops.io
+  resources:
+  - interfaceconfigs/status
+  verbs:
+  - get
+  - patch
+  - update

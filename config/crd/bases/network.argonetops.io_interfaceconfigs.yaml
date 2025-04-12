@@ -1,0 +1,84 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.17.2
+  name: interfaceconfigs.network.argonetops.io
+spec:
+  group: network.argonetops.io
+  names:
+    kind: InterfaceConfig
+    listKind: InterfaceConfigList
+    plural: interfaceconfigs
+    singular: interfaceconfig
+  scope: Namespaced
+  versions:
+  - name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: InterfaceConfig is the Schema for the interfaceconfigs API.
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: InterfaceConfigSpec defines the desired state of InterfaceConfig.
+            properties:
+              description:
+                type: string
+              deviceIP:
+                description: Foo is an example field of InterfaceConfig. Edit interfaceconfig_types.go
+                  to remove/update
+                type: string
+              deviceName:
+                type: string
+              devicePort:
+                type: integer
+              deviceType:
+                type: string
+              interfaceName:
+                type: string
+              ipAddress:
+                type: string
+              password:
+                type: string
+              shutdown:
+                type: boolean
+              subnetMask:
+                type: string
+              username:
+                type: string
+            required:
+            - interfaceName
+            type: object
+          status:
+            description: InterfaceConfigStatus defines the observed state of InterfaceConfig.
+            properties:
+              message:
+                type: string
+              state:
+                description: |-
+                  INSERT ADDITIONAL STATUS FIELD - define observed state of cluster
+                  Important: Run "make" to regenerate code after modifying this file
+                type: string
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}

@@ -1,0 +1,17 @@
+# config/samples/network_v1alpha1_interfaceconfig.yaml
+apiVersion: network.argonetops.io/v1alpha1
+kind: InterfaceConfig
+metadata:
+  name: gi0-1
+spec:
+  deviceIP: 192.168.244.138
+  devicePort: 22
+  deviceType: cisco_ios
+  username: fefe
+  password: fefe
+  interfaceName: GigabitEthernet0/1
+  description: testa bem
+  ipAddress: 10.0.0.1
+  subnetMask: 255.255.255.0
+  shutdown: false
+
