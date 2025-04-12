@@ -27,7 +27,7 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
-	"github.com/seunome/argonetops-operator/test/utils"
+	"github.com/faraujosilva/argonetops-operator/test/utils"
 )
 
 // namespace where the project is deployed in

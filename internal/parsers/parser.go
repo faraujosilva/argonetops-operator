@@ -62,7 +62,7 @@ func (p *CiscoIOSParser) ParseConfig(interfaceOutput string) (InterfaceFormatted
 	for _, line := range lines {
 		if strings.Contains(line, "description") {
 			parsedConfig.Descr = strings.TrimSpace(strings.Split(line, "description")[1])
-		} else if strings.Contains(line, "ip address") {
+		} else if strings.Contains(line, "ip address") && !strings.Contains(line, "ip address dhcp") && !strings.Contains(line, "no ip address") {
 			parsedConfig.IP = strings.Split(strings.TrimSpace(strings.Split(line, "ip address")[1]), " ")[0]
 			parsedConfig.Mask = strings.Split(strings.TrimSpace(strings.Split(line, "ip address")[1]), " ")[1]
 		}

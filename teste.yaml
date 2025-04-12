@@ -1,17 +1,54 @@
-# config/samples/network_v1alpha1_interfaceconfig.yaml
+# ---
+# apiVersion: v1
+# kind: ConfigMap
+# metadata:
+#   name: device-credentials
+# data:
+#   username: fefe
+#   password: fefe
+
+---
+apiVersion: network.argonetops.io/v1alpha1
+kind: DeviceConfig
+metadata:
+  name: router01
+spec:
+  hostname: router01
+  ip: 192.168.244.138
+  deviceType: cisco_ios
+  port: 22
+  access: ssh
+  username:
+    configMapKeyRef:
+      name: device-credentials
+      key: username
+  password:
+    configMapKeyRef:
+      name: device-credentials
+      key: password
+
+---
 apiVersion: network.argonetops.io/v1alpha1
 kind: InterfaceConfig
 metadata:
   name: gi0-1
 spec:
-  deviceIP: 192.168.244.138
-  devicePort: 22
-  deviceType: cisco_ios
-  username: fefe
-  password: fefe
+  deviceName: router01 # Referência ao DeviceConfig
   interfaceName: GigabitEthernet0/1
   description: testa bem
   ipAddress: 10.0.0.1
   subnetMask: 255.255.255.0
   shutdown: false
 
+---
+apiVersion: network.argonetops.io/v1alpha1
+kind: InterfaceConfig
+metadata:
+  name: gi0-2
+spec:
+  deviceName: router01 # Referência ao DeviceConfig
+  interfaceName: GigabitEthernet0/2
+  description: testa bem 2
+  ipAddress: 10.1.0.1
+  subnetMask: 255.255.255.0
+  shutdown: false

@@ -23,24 +23,14 @@ import (
 // EDIT THIS FILE!  THIS IS SCAFFOLDING FOR YOU TO OWN!
 // NOTE: json tags are required.  Any new fields you add must have json tags for the fields to be serialized.
 
-// InterfaceConfigSpec defines the desired state of InterfaceConfig.
+// InterfaceConfigSpec defines the desired state of InterfaceConfig
 type InterfaceConfigSpec struct {
-	// INSERT ADDITIONAL SPEC FIELDS - desired state of cluster
-	// Important: Run "make" to regenerate code after modifying this file
-
-	// Foo is an example field of InterfaceConfig. Edit interfaceconfig_types.go to remove/update
-	DeviceIP      string `json:"deviceIP,omitempty"`
 	DeviceName    string `json:"deviceName,omitempty"`
-	DevicePort    uint8  `json:"devicePort,omitempty"`
-	DeviceType    string `json:"deviceType,omitempty"`
-	InterfaceName string `json:"interfaceName"`
+	InterfaceName string `json:"interfaceName,omitempty"`
 	Description   string `json:"description,omitempty"`
 	IPAddress     string `json:"ipAddress,omitempty"`
 	SubnetMask    string `json:"subnetMask,omitempty"`
 	Shutdown      bool   `json:"shutdown,omitempty"`
-
-	Username string `json:"username,omitempty"`
-	Password string `json:"password,omitempty"`
 }
 
 // InterfaceConfigStatus defines the observed state of InterfaceConfig.

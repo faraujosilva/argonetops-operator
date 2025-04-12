@@ -7,6 +7,7 @@ rules:
 - apiGroups:
   - network.argonetops.io
   resources:
+  - deviceconfigs
   - interfaceconfigs
   verbs:
   - create
@@ -19,12 +20,14 @@ rules:
 - apiGroups:
   - network.argonetops.io
   resources:
+  - deviceconfigs/finalizers
   - interfaceconfigs/finalizers
   verbs:
   - update
 - apiGroups:
   - network.argonetops.io
   resources:
+  - deviceconfigs/status
   - interfaceconfigs/status
   verbs:
   - get

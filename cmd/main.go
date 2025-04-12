@@ -37,8 +37,8 @@ import (
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
 
-	networkv1alpha1 "github.com/seunome/argonetops-operator/api/v1alpha1"
-	"github.com/seunome/argonetops-operator/internal/controller"
+	networkv1alpha1 "github.com/faraujosilva/argonetops-operator/api/v1alpha1"
+	"github.com/faraujosilva/argonetops-operator/internal/controller"
 	// +kubebuilder:scaffold:imports
 )
 
@@ -207,6 +207,13 @@ func main() {
 		Scheme: mgr.GetScheme(),
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "InterfaceConfig")
+		os.Exit(1)
+	}
+	if err = (&controller.DeviceConfigReconciler{
+		Client: mgr.GetClient(),
+		Scheme: mgr.GetScheme(),
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "unable to create controller", "controller", "DeviceConfig")
 		os.Exit(1)
 	}
 	// +kubebuilder:scaffold:builder

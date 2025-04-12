@@ -19,17 +19,20 @@ package controller
 import (
 	"context"
 	"fmt"
+	"strconv"
+	"strings"
 	"time"
 
-	gomiko "github.com/Ali-aqrabawi/gomiko/pkg"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
-	networkv1alpha1 "github.com/seunome/argonetops-operator/api/v1alpha1"
-	"github.com/seunome/argonetops-operator/internal/parsers"
+	gomiko "github.com/Ali-aqrabawi/gomiko/pkg"
+	networkv1alpha1 "github.com/faraujosilva/argonetops-operator/api/v1alpha1"
+	"github.com/faraujosilva/argonetops-operator/internal/parsers"
 )
 
 // InterfaceConfigReconciler reconciles a InterfaceConfig object
@@ -57,38 +60,32 @@ const (
 // For more details, check Reconcile and its Result here:
 // - https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.20.4/pkg/reconcile
 
-func (r *InterfaceConfigReconciler) rollbackConfig(iface networkv1alpha1.InterfaceConfig) error {
-	// Aqui você pode implementar a lógica de rollback
-	// Por exemplo, restaurar a configuração anterior ou remover a interface
-
-	// Exemplo: apenas logando a ação
-	log := log.FromContext(context.Background())
+// dentro do método rollbackConfig
+func (r *InterfaceConfigReconciler) rollbackConfig(ctx context.Context, iface networkv1alpha1.InterfaceConfig) error {
+	log := log.FromContext(ctx)
 	log.Info("Aplicando rollback", "name", iface.Name)
 
-	device, err := gomiko.NewDevice(
-		iface.Spec.DeviceIP,
-		iface.Spec.Username,
-		iface.Spec.Password,
-		iface.Spec.DeviceType,
-		iface.Spec.DevicePort,
-	)
+	username, password, err := getCredentials(r.Client, ctx, iface.Namespace, "device-credentials", "username", "password")
 	if err != nil {
-		log.Error(err, "Erro 1 ao conectar ao dispositivo para rollback")
-		iface.Status.State = ErrorState
-		iface.Status.Message = err.Error()
-		if err := r.Update(context.Background(), &iface); err != nil {
-			log.Error(err, "Erro ao atualizar status após erro de rollback")
-		}
+		return err
 	}
 
-	// Connect to device
+	devicePortInt, _ := strconv.Atoi(iface.Labels["devicePort"])
+	devicePort := uint8(devicePortInt)
+
+	device, err := gomiko.NewDevice(
+		iface.Labels["deviceIP"],
+		username,
+		password,
+		iface.Labels["deviceType"],
+		devicePort,
+	)
+	if err != nil {
+		return err
+	}
+
 	if err := device.Connect(); err != nil {
-		log.Error(err, "Erro 2 ao conectar ao dispositivo para rollback")
-		iface.Status.State = ErrorState
-		iface.Status.Message = err.Error()
-		if err := r.Status().Update(context.Background(), &iface); err != nil {
-			log.Error(err, "Erro ao atualizar status após erro de rollback")
-		}
+		return err
 	}
 	defer device.Disconnect()
 
@@ -98,32 +95,16 @@ func (r *InterfaceConfigReconciler) rollbackConfig(iface networkv1alpha1.Interfa
 		"no ip address",
 		"shutdown",
 	}
-	_, err = device.SendConfigSet(rollbackCommands)
-	if err != nil {
-		log.Error(err, "Erro ao aplicar rollback")
-		iface.Status.State = ErrorState
-		iface.Status.Message = err.Error()
-		if err := r.Status().Update(context.Background(), &iface); err != nil {
-			log.Error(err, "Erro ao atualizar status após erro de rollback")
-		}
+	if _, err = device.SendConfigSet(rollbackCommands); err != nil {
+		return err
 	}
-
-	// Atualiza o status do objeto após o rollback
-	iface.Status.State = "RolledBack"
-	iface.Status.Message = "Rollback aplicado com sucesso"
-	if err := r.Status().Update(context.Background(), &iface); err != nil {
-		log.Error(err, "Erro ao atualizar status após rollback")
-	}
-	// Aqui você pode adicionar lógica adicional, como restaurar a configuração anterior
-	// ou remover a interface, dependendo do que você deseja fazer.
-	// Exemplo: apenas logando a ação
-	log.Info("Rollback aplicado com sucesso", "name", iface.Name)
 
 	return nil
 }
-func (r *InterfaceConfigReconciler) handleError(ctx context.Context, iface *networkv1alpha1.InterfaceConfig, err error, message string) {
+
+func (r *InterfaceConfigReconciler) handleError(ctx context.Context, devHostname string, iface *networkv1alpha1.InterfaceConfig, err error, message string) {
 	log := log.FromContext(ctx)
-	log.Error(err, message, "deviceIP", iface.Spec.DeviceIP, "interfaceName", iface.Spec.InterfaceName)
+	log.Error(err, message, "Hostname", devHostname, "interfaceName", iface.Spec.InterfaceName)
 
 	iface.Status.State = ErrorState
 	iface.Status.Message = message + ": " + err.Error()
@@ -136,9 +117,53 @@ func (r *InterfaceConfigReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 	const interfaceFinalizer = "network.argonetops.io/finalizer"
 
 	var iface networkv1alpha1.InterfaceConfig
+	log := log.FromContext(ctx)
+
 	if err := r.Get(ctx, req.NamespacedName, &iface); err != nil {
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
+
+	// Verifica se o DeviceConfig associado existe
+	var devConfig networkv1alpha1.DeviceConfig
+	deviceConfigKey := types.NamespacedName{Name: iface.Spec.DeviceName, Namespace: req.Namespace}
+	if err := r.Get(ctx, deviceConfigKey, &devConfig); err != nil {
+		if client.IgnoreNotFound(err) == nil {
+			return ctrl.Result{RequeueAfter: time.Second * 10}, nil
+		}
+	} // Verifica se o DeviceConfig tem o mesmo nome do InterfaceConfig
+
+	// Adiciona as infos do device no metadata
+	updatedLabels := map[string]string{
+		"deviceName": devConfig.Spec.Hostname,
+		"deviceIP":   devConfig.Spec.IP,
+		"deviceType": devConfig.Spec.DeviceType,
+		"devicePort": fmt.Sprintf("%d", devConfig.Spec.Port),
+	}
+	needsUpdate := false
+	for key, value := range updatedLabels {
+		if current, exists := iface.ObjectMeta.Labels[key]; !exists || current != value {
+			needsUpdate = true
+			break
+		}
+	}
+	if needsUpdate && iface.ObjectMeta.DeletionTimestamp.IsZero() {
+		iface.ObjectMeta.Labels = updatedLabels
+		if err := r.Update(ctx, &iface); err != nil {
+			log.Error(err, "Erro ao atualizar labels do InterfaceConfig")
+			return ctrl.Result{}, err
+		}
+		return ctrl.Result{Requeue: true}, nil // requeue após atualização
+	}
+
+	devicePortStr := iface.ObjectMeta.Labels["devicePort"]
+	log.Info("devicePort", "devicePort", devicePortStr)
+
+	devicePortInt, err := strconv.Atoi(devicePortStr)
+	if err != nil {
+		log.Error(err, "Erro ao converter devicePort para inteiro", "devicePort", devicePortStr)
+		return ctrl.Result{}, err
+	}
+	devicePort := uint8(devicePortInt)
 	if iface.ObjectMeta.DeletionTimestamp.IsZero() {
 		// Adiciona finalizer se ainda não tem
 		if !controllerutil.ContainsFinalizer(&iface, interfaceFinalizer) {
@@ -151,90 +176,130 @@ func (r *InterfaceConfigReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		// Objeto marcado para deleção
 		if controllerutil.ContainsFinalizer(&iface, interfaceFinalizer) {
 			// Aqui entra a lógica de rollback
-			err := r.rollbackConfig(iface)
+			// TOOD: Pegar credentcial baseado no metadata
+			username, password, err := getCredentials(r.Client, ctx, req.Namespace, "device-credentials", "username", "password")
 			if err != nil {
+				r.handleError(ctx, iface.Spec.DeviceName, &iface, err, "Erro ao obter credenciais do ConfigMap")
 				return ctrl.Result{}, err
 			}
 
+			log.Info("Criando nova conexão", "Hostname", iface.Spec.DeviceName)
+			// reconvert metadata string devicePrort to uint8
+			log.Info("devicePort", "devicePort", devicePort)
+
+			device, err := gomiko.NewDevice(
+				iface.ObjectMeta.Labels["deviceIP"],
+				username,
+				password,
+				iface.ObjectMeta.Labels["deviceType"],
+				devicePort,
+			)
+			if err != nil {
+				r.handleError(ctx, iface.Spec.DeviceName, &iface, err, "Erro ao criar dispositivo")
+				return ctrl.Result{}, err
+			}
+
+			if device == nil {
+				err := fmt.Errorf("dispositivo não foi inicializado corretamente")
+				r.handleError(ctx, iface.Spec.DeviceName, &iface, err, "Erro ao criar dispositivo")
+				return ctrl.Result{}, err
+			}
+			log.Info("Dispositivo criado com sucesso", "deviceIP", iface.ObjectMeta.Labels["deviceIP"])
+			if err := device.Connect(); err != nil {
+				r.handleError(ctx, iface.Spec.DeviceName, &iface, err, "Erro ao conectar ao dispositivo")
+				return ctrl.Result{}, err
+			}
+			defer device.Disconnect()
+			err = r.rollbackConfig(ctx, iface)
+			if err != nil {
+				log.Error(err, "Erro ao aplicar rollback")
+				return ctrl.Result{RequeueAfter: time.Second * 10}, nil
+			}
+
 			// Remove o finalizer após a limpeza
+			log.Info("Removendo finalizer do InterfaceConfig")
 			controllerutil.RemoveFinalizer(&iface, interfaceFinalizer)
 			if err := r.Update(ctx, &iface); err != nil {
+				log.Error(err, "Erro ao remover finalizer do InterfaceConfig")
 				return ctrl.Result{}, err
 			}
 		}
 		return ctrl.Result{}, nil
 	}
 
-	log := log.FromContext(ctx)
+	// TOOD: Pegar credentcial baseado no metadata
+	username, password, err := getCredentials(r.Client, ctx, req.Namespace, "device-credentials", "username", "password")
+	if err != nil {
+		r.handleError(ctx, iface.Spec.DeviceName, &iface, err, "Erro ao obter credenciais do ConfigMap")
+		return ctrl.Result{}, err
+	}
 
-	// Conecta ao dispositivo via SSH usando gomiko
+	log.Info("Criando nova conexão", "Hostname", iface.Spec.DeviceName)
 	device, err := gomiko.NewDevice(
-		iface.Spec.DeviceIP,
-		iface.Spec.Username,
-		iface.Spec.Password,
-		iface.Spec.DeviceType,
-		iface.Spec.DevicePort,
+		iface.ObjectMeta.Labels["deviceIP"],
+		username,
+		password,
+		iface.ObjectMeta.Labels["deviceType"],
+		devicePort,
 	)
 	if err != nil {
-		r.handleError(ctx, &iface, err, "Erro ao criar dispositivo")
+		r.handleError(ctx, iface.Spec.DeviceName, &iface, err, "Erro ao criar dispositivo")
 		return ctrl.Result{}, err
 	}
 
 	if device == nil {
 		err := fmt.Errorf("dispositivo não foi inicializado corretamente")
-		r.handleError(ctx, &iface, err, "Erro ao criar dispositivo")
+		r.handleError(ctx, iface.Spec.DeviceName, &iface, err, "Erro ao criar dispositivo")
 		return ctrl.Result{}, err
 	}
+	log.Info("Dispositivo criado com sucesso", "deviceIP", iface.ObjectMeta.Labels["deviceIP"])
 	if err := device.Connect(); err != nil {
-		r.handleError(ctx, &iface, err, "Erro 3 ao conectar ao dispositivo")
+		r.handleError(ctx, iface.Spec.DeviceName, &iface, err, "Erro ao conectar ao dispositivo")
 		return ctrl.Result{}, err
 	}
-
 	defer device.Disconnect()
-	// Coleta estado atual da interface
+
 	output, err := device.SendCommand("show running-config interface " + iface.Spec.InterfaceName)
 	if err != nil {
+		if strings.Contains(err.Error(), "timeout while reading, read pattern not found pattern") {
+			device.Disconnect()
+			log.Error(err, "Timeout ao obter configuração da interface, tentando novamente")
+			return ctrl.Result{RequeueAfter: time.Second * 2}, nil
+		}
 		return ctrl.Result{}, err
 	}
 
 	dt := parsers.InterfaceParserFactory{
-		DeviceType: iface.Spec.DeviceType,
+		DeviceType: devConfig.Spec.DeviceType,
 	}
 
 	parser, err := dt.GetParser()
 	if err != nil {
-		log.Error(err, "Erro ao obter parser para o dispositivo")
-		iface.Status.State = ErrorState
-		iface.Status.Message = err.Error()
-		if err := r.Status().Update(ctx, &iface); err != nil {
-			return ctrl.Result{}, err
-		}
+		r.handleError(ctx, iface.Spec.DeviceName, &iface, err, "Erro ao obter parser para o dispositivo")
 		return ctrl.Result{}, err
 	}
 
 	// Parseia a configuração atual da interface
 	parsedOutput, err := parser.ParseConfig(output)
 	if err != nil {
-		log.Error(err, "Erro ao parsear configuração da interface")
-		iface.Status.State = ErrorState
-		r.handleError(ctx, &iface, err, "Erro ao parsear configuração da interface")
+		r.handleError(ctx, iface.Spec.DeviceName, &iface, err, "Erro ao parsear configuração da interface")
 		return ctrl.Result{}, err
 	}
 
 	intstatuscmd, err := device.SendCommand("show interface " + iface.Spec.InterfaceName + " | in line")
 	if err != nil {
+		if strings.Contains(err.Error(), "timeout while reading, read pattern not found pattern") {
+			device.Disconnect()
+			log.Error(err, "Timeout ao obter configuração da interface, tentando novamente")
+			return ctrl.Result{RequeueAfter: time.Second * 2}, nil
+		}
 		log.Error(err, "Erro ao obter status da interface, considerando UP")
 	}
 	log.Info("Status da interface: ", "intstatuscmd", intstatuscmd)
 	// Parseia o status da interface
 	intstatus, err := parser.ParseStatus(intstatuscmd)
 	if err != nil {
-		log.Error(err, "Erro ao parsear status da interface")
-		iface.Status.State = ErrorState
-		iface.Status.Message = err.Error()
-		if err := r.Status().Update(ctx, &iface); err != nil {
-			return ctrl.Result{}, err
-		}
+		r.handleError(ctx, iface.Spec.DeviceName, &iface, err, "Erro ao parsear status da interface")
 		return ctrl.Result{}, err
 	}
 	parsedOutput.State = intstatus
@@ -272,12 +337,12 @@ func (r *InterfaceConfigReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		}
 		cmds, err := device.SendConfigSet(configCommands)
 		if err != nil {
-			log.Error(err, "Erro ao aplicar configuração")
-			iface.Status.State = ErrorState
-			iface.Status.Message = err.Error()
-			if err := r.Status().Update(ctx, &iface); err != nil {
-				return ctrl.Result{}, err
+			if strings.Contains(err.Error(), "timeout while reading, read pattern not found pattern") {
+				device.Disconnect()
+				log.Error(err, "Timeout ao obter configuração da interface, tentando novamente")
+				return ctrl.Result{RequeueAfter: time.Second * 2}, nil
 			}
+			r.handleError(ctx, iface.Spec.DeviceName, &iface, err, "Erro ao aplicar configuração")
 			return ctrl.Result{}, err
 		}
 		log.Info("Configuração aplicada com sucesso", "commands", cmds)

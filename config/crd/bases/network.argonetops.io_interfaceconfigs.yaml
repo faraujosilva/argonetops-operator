@@ -37,34 +37,20 @@ spec:
           metadata:
             type: object
           spec:
-            description: InterfaceConfigSpec defines the desired state of InterfaceConfig.
+            description: InterfaceConfigSpec defines the desired state of InterfaceConfig
             properties:
               description:
                 type: string
-              deviceIP:
-                description: Foo is an example field of InterfaceConfig. Edit interfaceconfig_types.go
-                  to remove/update
-                type: string
               deviceName:
-                type: string
-              devicePort:
-                type: integer
-              deviceType:
                 type: string
               interfaceName:
                 type: string
               ipAddress:
                 type: string
-              password:
-                type: string
               shutdown:
                 type: boolean
               subnetMask:
                 type: string
-              username:
-                type: string
-            required:
-            - interfaceName
             type: object
           status:
             description: InterfaceConfigStatus defines the observed state of InterfaceConfig.

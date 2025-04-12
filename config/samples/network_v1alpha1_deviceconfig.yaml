@@ -1,0 +1,9 @@
+apiVersion: network.argonetops.io/v1alpha1
+kind: DeviceConfig
+metadata:
+  labels:
+    app.kubernetes.io/name: argonetops
+    app.kubernetes.io/managed-by: kustomize
+  name: deviceconfig-sample
+spec:
+  # TODO(user): Add fields here

@@ -6,7 +6,7 @@ domain: argonetops.io
 layout:
 - go.kubebuilder.io/v4
 projectName: argonetops
-repo: github.com/seunome/argonetops-operator
+repo: github.com/faraujosilva/argonetops-operator
 resources:
 - api:
     crdVersion: v1
@@ -15,6 +15,24 @@ resources:
   domain: argonetops.io
   group: network
   kind: InterfaceConfig
-  path: github.com/seunome/argonetops-operator/api/v1alpha1
+  path: github.com/faraujosilva/argonetops-operator/api/v1alpha1
+  version: v1alpha1
+- api:
+    crdVersion: v1
+    namespaced: true
+  controller: true
+  domain: argonetops.io
+  group: network
+  kind: Setup
+  path: github.com/faraujosilva/argonetops-operator/api/v1alpha11
+  version: v1alpha11
+- api:
+    crdVersion: v1
+    namespaced: true
+  controller: true
+  domain: argonetops.io
+  group: network
+  kind: DeviceConfig
+  path: github.com/faraujosilva/argonetops-operator/api/v1alpha1
   version: v1alpha1
 version: "3"
