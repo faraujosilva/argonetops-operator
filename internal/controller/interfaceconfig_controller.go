@@ -38,6 +38,11 @@ type InterfaceConfigReconciler struct {
 	Scheme *runtime.Scheme
 }
 
+const (
+	ErrorState   = "Error"
+	SuccessState = "Success"
+)
+
 // +kubebuilder:rbac:groups=network.argonetops.io,resources=interfaceconfigs,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=network.argonetops.io,resources=interfaceconfigs/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=network.argonetops.io,resources=interfaceconfigs/finalizers,verbs=update
@@ -69,7 +74,7 @@ func (r *InterfaceConfigReconciler) rollbackConfig(iface networkv1alpha1.Interfa
 	)
 	if err != nil {
 		log.Error(err, "Erro 1 ao conectar ao dispositivo para rollback")
-		iface.Status.State = "Error"
+		iface.Status.State = ErrorState
 		iface.Status.Message = err.Error()
 		if err := r.Update(context.Background(), &iface); err != nil {
 			log.Error(err, "Erro ao atualizar status após erro de rollback")
@@ -79,7 +84,7 @@ func (r *InterfaceConfigReconciler) rollbackConfig(iface networkv1alpha1.Interfa
 	// Connect to device
 	if err := device.Connect(); err != nil {
 		log.Error(err, "Erro 2 ao conectar ao dispositivo para rollback")
-		iface.Status.State = "Error"
+		iface.Status.State = ErrorState
 		iface.Status.Message = err.Error()
 		if err := r.Status().Update(context.Background(), &iface); err != nil {
 			log.Error(err, "Erro ao atualizar status após erro de rollback")
@@ -96,7 +101,7 @@ func (r *InterfaceConfigReconciler) rollbackConfig(iface networkv1alpha1.Interfa
 	_, err = device.SendConfigSet(rollbackCommands)
 	if err != nil {
 		log.Error(err, "Erro ao aplicar rollback")
-		iface.Status.State = "Error"
+		iface.Status.State = ErrorState
 		iface.Status.Message = err.Error()
 		if err := r.Status().Update(context.Background(), &iface); err != nil {
 			log.Error(err, "Erro ao atualizar status após erro de rollback")
@@ -120,7 +125,7 @@ func (r *InterfaceConfigReconciler) handleError(ctx context.Context, iface *netw
 	log := log.FromContext(ctx)
 	log.Error(err, message, "deviceIP", iface.Spec.DeviceIP, "interfaceName", iface.Spec.InterfaceName)
 
-	iface.Status.State = "Error"
+	iface.Status.State = ErrorState
 	iface.Status.Message = message + ": " + err.Error()
 	if updateErr := r.Status().Update(ctx, iface); updateErr != nil {
 		log.Error(updateErr, "Erro ao atualizar status do objeto após erro")
@@ -180,7 +185,6 @@ func (r *InterfaceConfigReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		r.handleError(ctx, &iface, err, "Erro ao criar dispositivo")
 		return ctrl.Result{}, err
 	}
-	//Connect to device
 	if err := device.Connect(); err != nil {
 		r.handleError(ctx, &iface, err, "Erro 3 ao conectar ao dispositivo")
 		return ctrl.Result{}, err
@@ -200,7 +204,7 @@ func (r *InterfaceConfigReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 	parser, err := dt.GetParser()
 	if err != nil {
 		log.Error(err, "Erro ao obter parser para o dispositivo")
-		iface.Status.State = "Error"
+		iface.Status.State = ErrorState
 		iface.Status.Message = err.Error()
 		if err := r.Status().Update(ctx, &iface); err != nil {
 			return ctrl.Result{}, err
@@ -210,6 +214,12 @@ func (r *InterfaceConfigReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 
 	// Parseia a configuração atual da interface
 	parsedOutput, err := parser.ParseConfig(output)
+	if err != nil {
+		log.Error(err, "Erro ao parsear configuração da interface")
+		iface.Status.State = ErrorState
+		r.handleError(ctx, &iface, err, "Erro ao parsear configuração da interface")
+		return ctrl.Result{}, err
+	}
 
 	intstatuscmd, err := device.SendCommand("show interface " + iface.Spec.InterfaceName + " | in line")
 	if err != nil {
@@ -220,7 +230,7 @@ func (r *InterfaceConfigReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 	intstatus, err := parser.ParseStatus(intstatuscmd)
 	if err != nil {
 		log.Error(err, "Erro ao parsear status da interface")
-		iface.Status.State = "Error"
+		iface.Status.State = ErrorState
 		iface.Status.Message = err.Error()
 		if err := r.Status().Update(ctx, &iface); err != nil {
 			return ctrl.Result{}, err
@@ -263,7 +273,7 @@ func (r *InterfaceConfigReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		cmds, err := device.SendConfigSet(configCommands)
 		if err != nil {
 			log.Error(err, "Erro ao aplicar configuração")
-			iface.Status.State = "Error"
+			iface.Status.State = ErrorState
 			iface.Status.Message = err.Error()
 			if err := r.Status().Update(ctx, &iface); err != nil {
 				return ctrl.Result{}, err
@@ -273,7 +283,7 @@ func (r *InterfaceConfigReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		log.Info("Configuração aplicada com sucesso", "commands", cmds)
 	} else {
 		log.Info("Configuração já está atualizada")
-		iface.Status.State = "Success"
+		iface.Status.State = SuccessState
 		iface.Status.Message = "Configuração aplicada com sucesso"
 		if err := r.Status().Update(ctx, &iface); err != nil {
 			return ctrl.Result{}, err
