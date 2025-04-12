@@ -18,7 +18,7 @@ package controller
 
 import (
 	"context"
-	"strings"
+	"fmt"
 	"time"
 
 	gomiko "github.com/Ali-aqrabawi/gomiko/pkg"
@@ -29,6 +29,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	networkv1alpha1 "github.com/seunome/argonetops-operator/api/v1alpha1"
+	"github.com/seunome/argonetops-operator/internal/parsers"
 )
 
 // InterfaceConfigReconciler reconciles a InterfaceConfig object
@@ -67,7 +68,7 @@ func (r *InterfaceConfigReconciler) rollbackConfig(iface networkv1alpha1.Interfa
 		iface.Spec.DevicePort,
 	)
 	if err != nil {
-		log.Error(err, "Erro ao conectar ao dispositivo para rollback")
+		log.Error(err, "Erro 1 ao conectar ao dispositivo para rollback")
 		iface.Status.State = "Error"
 		iface.Status.Message = err.Error()
 		if err := r.Update(context.Background(), &iface); err != nil {
@@ -77,7 +78,7 @@ func (r *InterfaceConfigReconciler) rollbackConfig(iface networkv1alpha1.Interfa
 
 	// Connect to device
 	if err := device.Connect(); err != nil {
-		log.Error(err, "Erro ao conectar ao dispositivo para rollback")
+		log.Error(err, "Erro 2 ao conectar ao dispositivo para rollback")
 		iface.Status.State = "Error"
 		iface.Status.Message = err.Error()
 		if err := r.Status().Update(context.Background(), &iface); err != nil {
@@ -114,6 +115,16 @@ func (r *InterfaceConfigReconciler) rollbackConfig(iface networkv1alpha1.Interfa
 	log.Info("Rollback aplicado com sucesso", "name", iface.Name)
 
 	return nil
+}
+func (r *InterfaceConfigReconciler) handleError(ctx context.Context, iface *networkv1alpha1.InterfaceConfig, err error, message string) {
+	log := log.FromContext(ctx)
+	log.Error(err, message, "deviceIP", iface.Spec.DeviceIP, "interfaceName", iface.Spec.InterfaceName)
+
+	iface.Status.State = "Error"
+	iface.Status.Message = message + ": " + err.Error()
+	if updateErr := r.Status().Update(ctx, iface); updateErr != nil {
+		log.Error(updateErr, "Erro ao atualizar status do objeto após erro")
+	}
 }
 
 func (r *InterfaceConfigReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
@@ -159,9 +170,36 @@ func (r *InterfaceConfigReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		iface.Spec.DeviceType,
 		iface.Spec.DevicePort,
 	)
+	if err != nil {
+		r.handleError(ctx, &iface, err, "Erro ao criar dispositivo")
+		return ctrl.Result{}, err
+	}
+
+	if device == nil {
+		err := fmt.Errorf("dispositivo não foi inicializado corretamente")
+		r.handleError(ctx, &iface, err, "Erro ao criar dispositivo")
+		return ctrl.Result{}, err
+	}
 	//Connect to device
 	if err := device.Connect(); err != nil {
-		log.Error(err, "Erro ao conectar ao dispositivo")
+		r.handleError(ctx, &iface, err, "Erro 3 ao conectar ao dispositivo")
+		return ctrl.Result{}, err
+	}
+
+	defer device.Disconnect()
+	// Coleta estado atual da interface
+	output, err := device.SendCommand("show running-config interface " + iface.Spec.InterfaceName)
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+
+	dt := parsers.InterfaceParserFactory{
+		DeviceType: iface.Spec.DeviceType,
+	}
+
+	parser, err := dt.GetParser()
+	if err != nil {
+		log.Error(err, "Erro ao obter parser para o dispositivo")
 		iface.Status.State = "Error"
 		iface.Status.Message = err.Error()
 		if err := r.Status().Update(ctx, &iface); err != nil {
@@ -169,49 +207,80 @@ func (r *InterfaceConfigReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		}
 		return ctrl.Result{}, err
 	}
-	defer device.Disconnect()
 
-	// Coleta estado atual da interface
-	output, err := device.SendCommand("show running-config interface " + iface.Spec.InterfaceName)
+	// Parseia a configuração atual da interface
+	parsedOutput, err := parser.ParseConfig(output)
+
+	intstatuscmd, err := device.SendCommand("show interface " + iface.Spec.InterfaceName + " | in line")
 	if err != nil {
+		log.Error(err, "Erro ao obter status da interface, considerando UP")
+	}
+	log.Info("Status da interface: ", "intstatuscmd", intstatuscmd)
+	// Parseia o status da interface
+	intstatus, err := parser.ParseStatus(intstatuscmd)
+	if err != nil {
+		log.Error(err, "Erro ao parsear status da interface")
+		iface.Status.State = "Error"
+		iface.Status.Message = err.Error()
+		if err := r.Status().Update(ctx, &iface); err != nil {
+			return ctrl.Result{}, err
+		}
 		return ctrl.Result{}, err
 	}
+	parsedOutput.State = intstatus
 
-	log.Info("Estado atual da interface: ", "output", output)
-
-	desiredConfig := []string{
-		"interface " + iface.Spec.InterfaceName,
-		"description " + iface.Spec.Description,
-		"ip address " + iface.Spec.IPAddress + " " + iface.Spec.SubnetMask,
-	}
-	if !iface.Spec.Shutdown {
-		desiredConfig = append(desiredConfig, "no shutdown")
+	// Verifica se a interface está em shutdown
+	var desiredState string
+	if iface.Spec.Shutdown {
+		desiredState = "DOWN"
 	} else {
-		desiredConfig = append(desiredConfig, "shutdown")
+		desiredState = "UP"
 	}
 
-	// Simples verificação de diferença (pode ser melhorado com hashing ou parser)
-	for _, cmd := range desiredConfig {
-		if !strings.Contains(output, cmd) {
-			log.Info("Diferença detectada, aplicando configuração")
-			_, err := device.SendConfigSet(desiredConfig)
-			if err != nil {
-				iface.Status.State = "Error"
-				iface.Status.Message = err.Error()
-				_ = r.Status().Update(ctx, &iface)
+	desiredConfig := parsers.InterfaceFormatted{
+		Name:  iface.Spec.InterfaceName,
+		Descr: iface.Spec.Description,
+		IP:    iface.Spec.IPAddress,
+		Mask:  iface.Spec.SubnetMask,
+		State: desiredState,
+	}
+	log.Info("Configuração desejada: ", "desiredConfig", desiredConfig)
+	log.Info("Configuração atual: ", "parsedOutput", parsedOutput)
+	// Compara a config desejada com o output formatado
+	if parsedOutput.Name != desiredConfig.Name ||
+		parsedOutput.Descr != desiredConfig.Descr ||
+		parsedOutput.IP != desiredConfig.IP ||
+		parsedOutput.Mask != desiredConfig.Mask ||
+		parsedOutput.State != desiredConfig.State {
+		log.Info("Configuração não corresponde, aplicando alterações")
+		// Se a configuração não corresponder, aplica as alterações
+		configCommands := []string{
+			"interface " + iface.Spec.InterfaceName,
+			"description " + iface.Spec.Description,
+			"ip address " + iface.Spec.IPAddress + " " + iface.Spec.SubnetMask,
+			"no shutdown",
+		}
+		cmds, err := device.SendConfigSet(configCommands)
+		if err != nil {
+			log.Error(err, "Erro ao aplicar configuração")
+			iface.Status.State = "Error"
+			iface.Status.Message = err.Error()
+			if err := r.Status().Update(ctx, &iface); err != nil {
 				return ctrl.Result{}, err
 			}
-			break
+			return ctrl.Result{}, err
+		}
+		log.Info("Configuração aplicada com sucesso", "commands", cmds)
+	} else {
+		log.Info("Configuração já está atualizada")
+		iface.Status.State = "Success"
+		iface.Status.Message = "Configuração aplicada com sucesso"
+		if err := r.Status().Update(ctx, &iface); err != nil {
+			return ctrl.Result{}, err
 		}
 	}
 
-	iface.Status.State = "Success"
-	iface.Status.Message = "Configuração aplicada com sucesso"
-	if err := r.Status().Update(ctx, &iface); err != nil {
-		return ctrl.Result{}, err
-	}
-
-	return ctrl.Result{RequeueAfter: time.Second * 5}, nil
+	return ctrl.Result{RequeueAfter: time.Second * 30}, nil
 }
 
 // SetupWithManager sets up the controller with the Manager.
