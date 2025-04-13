@@ -60,7 +60,7 @@ func (r *DeviceConfigReconciler) cleanupDevice(ctx context.Context, devConfig *n
 	log := log.FromContext(ctx)
 	log.Info("Iniciando rollback (cleanup) do DeviceConfig", "device", devConfig.Name)
 
-	username, password, err := getCredentials(r.Client, ctx, devConfig.Namespace, "device-credentials", "username", "password")
+	username, password, err := getCredentials(r.Client, ctx, devConfig.Namespace)
 	if err != nil {
 		log.Error(err, "Falha ao obter credenciais durante rollback do DeviceConfig")
 		return err
@@ -71,7 +71,7 @@ func (r *DeviceConfigReconciler) cleanupDevice(ctx context.Context, devConfig *n
 		username,
 		password,
 		devConfig.Spec.DeviceType,
-		uint8(devConfig.Spec.Port),
+		devConfig.Spec.Port,
 	)
 	if err != nil {
 		log.Error(err, "Erro ao criar dispositivo durante rollback")
@@ -84,10 +84,8 @@ func (r *DeviceConfigReconciler) cleanupDevice(ctx context.Context, devConfig *n
 	}
 	defer device.Disconnect()
 
-	// Comandos de rollback específicos (exemplo hipotético)
 	rollbackCommands := []string{
 		"default hostname",
-		// outros comandos de rollback necessários...
 	}
 
 	if _, err := device.SendConfigSet(rollbackCommands); err != nil {
@@ -111,20 +109,20 @@ func (r *DeviceConfigReconciler) handleError(ctx context.Context, devConfig *net
 	}
 }
 
-func getCredentials(client client.Client, ctx context.Context, namespace, configMapName, usernameKey, passwordKey string) (string, string, error) {
+func getCredentials(client client.Client, ctx context.Context, namespace string) (string, string, error) {
 	var configMap corev1.ConfigMap
-	if err := client.Get(ctx, types.NamespacedName{Name: configMapName, Namespace: namespace}, &configMap); err != nil {
+	if err := client.Get(ctx, types.NamespacedName{Name: "device-credentials", Namespace: namespace}, &configMap); err != nil {
 		return "", "", err
 	}
 
-	username, ok := configMap.Data[usernameKey]
+	username, ok := configMap.Data["username"]
 	if !ok {
-		return "", "", fmt.Errorf("username key %s not found in ConfigMap %s", usernameKey, configMapName)
+		return "", "", fmt.Errorf("username key %s not found in ConfigMap %s", "username", "device-credentials")
 	}
 
-	password, ok := configMap.Data[passwordKey]
+	password, ok := configMap.Data["password"]
 	if !ok {
-		return "", "", fmt.Errorf("password key %s not found in ConfigMap %s", passwordKey, configMapName)
+		return "", "", fmt.Errorf("password key %s not found in ConfigMap %s", "password", "device-credentials")
 	}
 
 	return username, password, nil
@@ -165,8 +163,8 @@ func (r *DeviceConfigReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	log := log.FromContext(ctx)
 
 	// Obtenha as credenciais do ConfigMap
-	// TOOD: Pegar credentcial baseado no metadata
-	username, password, err := getCredentials(r.Client, ctx, req.Namespace, "device-credentials", "username", "password")
+	// TODO: Pegar credentcial baseado no metadata
+	username, password, err := getCredentials(r.Client, ctx, req.Namespace)
 	if err != nil {
 		r.handleError(ctx, &devConfig, err, "Erro ao buscar credenciais")
 		return ctrl.Result{}, err

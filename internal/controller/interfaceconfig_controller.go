@@ -65,7 +65,7 @@ func (r *InterfaceConfigReconciler) rollbackConfig(ctx context.Context, iface ne
 	log := log.FromContext(ctx)
 	log.Info("Aplicando rollback", "name", iface.Name)
 
-	username, password, err := getCredentials(r.Client, ctx, iface.Namespace, "device-credentials", "username", "password")
+	username, password, err := getCredentials(r.Client, ctx, iface.Namespace)
 	if err != nil {
 		return err
 	}
@@ -176,8 +176,8 @@ func (r *InterfaceConfigReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		// Objeto marcado para deleção
 		if controllerutil.ContainsFinalizer(&iface, interfaceFinalizer) {
 			// Aqui entra a lógica de rollback
-			// TOOD: Pegar credentcial baseado no metadata
-			username, password, err := getCredentials(r.Client, ctx, req.Namespace, "device-credentials", "username", "password")
+			// TODO: Pegar credentcial baseado no metadata
+			username, password, err := getCredentials(r.Client, ctx, req.Namespace)
 			if err != nil {
 				r.handleError(ctx, iface.Spec.DeviceName, &iface, err, "Erro ao obter credenciais do ConfigMap")
 				return ctrl.Result{}, err
@@ -227,8 +227,8 @@ func (r *InterfaceConfigReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		return ctrl.Result{}, nil
 	}
 
-	// TOOD: Pegar credentcial baseado no metadata
-	username, password, err := getCredentials(r.Client, ctx, req.Namespace, "device-credentials", "username", "password")
+	// TODO: Pegar credentcial baseado no metadata
+	username, password, err := getCredentials(r.Client, ctx, req.Namespace)
 	if err != nil {
 		r.handleError(ctx, iface.Spec.DeviceName, &iface, err, "Erro ao obter credenciais do ConfigMap")
 		return ctrl.Result{}, err
